@@ -56,24 +56,29 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     val command = rawText.lowercase()
 
     when {
-
-      // 🔥 more natural speech coverage
       command.contains("photo") ||
-              command.contains("picture") ||
-              command.contains("capture") ||
-              command.contains("snap") -> {
+      command.contains("picture") ||
+      command.contains("capture") ||
+      command.contains("snap") -> {
 
         if (uiState.value.isStreaming) {
+          // Already on stream screen — direct capture
           streamViewModel?.capturePhoto()
-          setRecentError("Voice: Capture triggered")
+        } else if (uiState.value.isRegistered && uiState.value.hasActiveDevice) {
+          // Idle with connected glasses — full auto flow:
+          // set auto-capture flag BEFORE navigating so startStream() doesn't lose it
+          streamViewModel?.setAutoCaptureMode()
+          navigateToStreaming { PermissionStatus.Granted }
+        } else if (uiState.value.isRegistered) {
+          setRecentError("Glasses not connected")
         }
       }
 
-      command.contains("start stream") -> {
+      command.contains("start") && command.contains("stream") -> {
         navigateToStreaming { PermissionStatus.Granted }
       }
 
-      command.contains("stop stream") -> {
+      command.contains("stop") && command.contains("stream") -> {
         navigateToDeviceSelection()
       }
     }

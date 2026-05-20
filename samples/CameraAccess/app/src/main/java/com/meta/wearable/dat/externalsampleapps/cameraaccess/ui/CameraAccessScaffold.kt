@@ -1,6 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import android.app.Activity
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
@@ -32,7 +32,7 @@ fun CameraAccessScaffold(
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = context as? ComponentActivity
 
     // -------------------------
     // attach stream VM

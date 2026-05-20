@@ -199,6 +199,16 @@ fun NonStreamScreen(
           )
         }
 
+        // Voice hint — always visible when device is connected so user knows the mic is active
+        if (uiState.hasActiveDevice) {
+          Text(
+              text = "Say \"Take Picture\" to identify",
+              style = MaterialTheme.typography.bodyMedium,
+              color = Color.White.copy(alpha = 0.6f),
+              textAlign = TextAlign.Center,
+          )
+        }
+
         // Start Streaming Button
         SwitchButton(
             label = stringResource(R.string.stream_button_title),
