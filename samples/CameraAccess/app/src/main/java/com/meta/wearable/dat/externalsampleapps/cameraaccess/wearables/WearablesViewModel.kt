@@ -1,21 +1,6 @@
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- * All rights reserved.
- *
- * This source code is licensed under the license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-// WearablesViewModel - Core DAT SDK Integration
-//
-// This ViewModel demonstrates the core DAT API patterns for:
-// - Device registration and unregistration using the DAT SDK
-// - Permission management for wearable devices
-// - Device discovery and state management
-// - Integration with MockDeviceKit for testing
-
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import android.app.Activity
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -37,10 +22,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class WearablesViewModel(application: Application) : AndroidViewModel(application) {
+
   private val _uiState = MutableStateFlow(WearablesUiState())
   val uiState: StateFlow<WearablesUiState> = _uiState.asStateFlow()
 
-  // AutoDeviceSelector automatically selects the first available wearable device.
+  // =========================
+  // DEVICE CONTROL
+  // =========================
   val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
   private var deviceSelectorJob: Job? = null
 
@@ -48,73 +36,51 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   private val deviceMonitoringJobs = mutableMapOf<DeviceIdentifier, Job>()
   private val deviceCompatibility = mutableMapOf<DeviceIdentifier, DeviceCompatibility>()
 
-  private fun startMonitoring() {
-    if (monitoringStarted) {
-      return
-    }
-    monitoringStarted = true
+  // =========================
+  // STREAM BRIDGE (NEW)
+  // =========================
+  private var streamViewModel: StreamViewModel? = null
 
-    // Monitor device selector for active device
-    deviceSelectorJob = viewModelScope.launch {
-      deviceSelector.activeDeviceFlow().collect { device ->
-        _uiState.update { it.copy(hasActiveDevice = device != null) }
-      }
-    }
+  fun attachStreamViewModel(vm: StreamViewModel) {
+    streamViewModel = vm
+  }
 
-    // This allows the app to react to registration changes (registered, unregistered, etc.)
-    viewModelScope.launch {
-      Wearables.registrationState.collect { value ->
-        val previousState = _uiState.value.registrationState
-        val showGettingStartedSheet =
-            value == RegistrationState.REGISTERED && previousState == RegistrationState.REGISTERING
-        _uiState.update {
-          it.copy(registrationState = value, isGettingStartedSheetVisible = showGettingStartedSheet)
+  fun detachStreamViewModel() {
+    streamViewModel = null
+  }
+
+  // =========================
+  // VOICE COMMAND SYSTEM
+  // =========================
+  fun onVoiceCommand(rawText: String) {
+    val command = rawText.lowercase()
+
+    when {
+
+      // 🔥 more natural speech coverage
+      command.contains("photo") ||
+              command.contains("picture") ||
+              command.contains("capture") ||
+              command.contains("snap") -> {
+
+        if (uiState.value.isStreaming) {
+          streamViewModel?.capturePhoto()
+          setRecentError("Voice: Capture triggered")
         }
       }
-    }
-    // This automatically updates when devices are discovered, connected, or disconnected
-    viewModelScope.launch {
-      Wearables.devices.collect { value ->
-        _uiState.update { it.copy(devices = value.toList().toImmutableList()) }
-        // Monitor device metadata for compatibility issues
-        monitorDeviceCompatibility(value)
+
+      command.contains("start stream") -> {
+        navigateToStreaming { PermissionStatus.Granted }
+      }
+
+      command.contains("stop stream") -> {
+        navigateToDeviceSelection()
       }
     }
   }
 
-  private fun monitorDeviceCompatibility(devices: Set<DeviceIdentifier>) {
-    // Cancel monitoring jobs for devices that are no longer in the list
-    val removedDevices = deviceMonitoringJobs.keys - devices
-    removedDevices.forEach { deviceId ->
-      deviceMonitoringJobs[deviceId]?.cancel()
-      deviceMonitoringJobs.remove(deviceId)
-      deviceCompatibility.remove(deviceId)
-    }
-    updateFirmwareUpdateRequired()
-
-    // Start monitoring jobs only for new devices (not already being monitored)
-    val newDevices = devices - deviceMonitoringJobs.keys
-    newDevices.forEach { deviceId ->
-      val job = viewModelScope.launch {
-        Wearables.devicesMetadata[deviceId]?.collect { metadata ->
-          deviceCompatibility[deviceId] = metadata.compatibility
-          updateFirmwareUpdateRequired()
-          if (metadata.compatibility == DeviceCompatibility.DEVICE_UPDATE_REQUIRED) {
-            val deviceName = metadata.name.ifEmpty { deviceId }
-            setRecentError("Device '$deviceName' requires an update to work with this app")
-          }
-        }
-      }
-      deviceMonitoringJobs[deviceId] = job
-    }
-  }
-
-  fun startRegistration(activity: Activity) {
-    Wearables.startRegistration(activity)
-  }
-
-  fun startUnregistration(activity: Activity) {
-    Wearables.startUnregistration(activity)
+  fun simulateVoiceInput(text: String) {
+    onVoiceCommand(text)
   }
 
   fun openFirmwareUpdate(activity: Activity) {
@@ -129,31 +95,102 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
   }
 
-  fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+  // =========================
+  // ORIGINAL LOGIC
+  // =========================
+
+  private fun startMonitoring() {
+    if (monitoringStarted) return
+    monitoringStarted = true
+
+    deviceSelectorJob = viewModelScope.launch {
+      deviceSelector.activeDeviceFlow().collect { device ->
+        _uiState.update { it.copy(hasActiveDevice = device != null) }
+      }
+    }
+
     viewModelScope.launch {
-      val permission = Permission.CAMERA // Camera permission is required for streaming
+      Wearables.registrationState.collect { value ->
+        val previousState = _uiState.value.registrationState
+        val showGettingStartedSheet =
+          value == RegistrationState.REGISTERED &&
+                  previousState == RegistrationState.REGISTERING
+
+        _uiState.update {
+          it.copy(
+            registrationState = value,
+            isGettingStartedSheetVisible = showGettingStartedSheet
+          )
+        }
+      }
+    }
+
+    viewModelScope.launch {
+      Wearables.devices.collect { value ->
+        _uiState.update { it.copy(devices = value.toList().toImmutableList()) }
+        monitorDeviceCompatibility(value)
+      }
+    }
+  }
+
+  private fun monitorDeviceCompatibility(devices: Set<DeviceIdentifier>) {
+    val removedDevices = deviceMonitoringJobs.keys - devices
+    removedDevices.forEach { id ->
+      deviceMonitoringJobs[id]?.cancel()
+      deviceMonitoringJobs.remove(id)
+      deviceCompatibility.remove(id)
+    }
+
+    updateFirmwareUpdateRequired()
+
+    val newDevices = devices - deviceMonitoringJobs.keys
+    newDevices.forEach { id ->
+      val job = viewModelScope.launch {
+        Wearables.devicesMetadata[id]?.collect { metadata ->
+          deviceCompatibility[id] = metadata.compatibility
+          updateFirmwareUpdateRequired()
+
+          if (metadata.compatibility == DeviceCompatibility.DEVICE_UPDATE_REQUIRED) {
+            val name = metadata.name.ifEmpty { id }
+            setRecentError("Device '$name' requires update")
+          }
+        }
+      }
+      deviceMonitoringJobs[id] = job
+    }
+  }
+
+  fun startRegistration(activity: Activity) {
+    Wearables.startRegistration(activity)
+  }
+
+  fun startUnregistration(activity: Activity) {
+    Wearables.startUnregistration(activity)
+  }
+
+  fun navigateToStreaming(
+    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus
+  ) {
+    viewModelScope.launch {
+      val permission = Permission.CAMERA
       val result = Wearables.checkPermissionStatus(permission)
 
-      // Handle the result
-      result.onFailure { error, _ ->
-        setRecentError("Permission check error: ${error.description}")
-        return@launch
+      result.onFailure { error ->
+        setRecentError(error.toString())
       }
 
-      val permissionStatus = result.getOrNull()
-      if (permissionStatus == PermissionStatus.Granted) {
+      val status = result.getOrNull()
+      if (status == PermissionStatus.Granted) {
         _uiState.update { it.copy(isStreaming = true) }
         return@launch
       }
 
-      // Request permission
-      val requestedPermissionStatus = onRequestWearablesPermission(permission)
-      when (requestedPermissionStatus) {
-        PermissionStatus.Denied -> {
-          setRecentError("Permission denied")
-        }
+      when (onRequestWearablesPermission(permission)) {
         PermissionStatus.Granted -> {
           _uiState.update { it.copy(isStreaming = true) }
+        }
+        PermissionStatus.Denied -> {
+          setRecentError("Permission denied")
         }
       }
     }
@@ -183,15 +220,21 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     _uiState.update { it.copy(isDatAppUpdateRequired = required) }
   }
 
-  fun onPermissionsResult(permissionsResult: Map<String, Boolean>, onAllGranted: () -> Unit) {
+  fun onPermissionsResult(
+    permissionsResult: Map<String, Boolean>,
+    onAllGranted: () -> Unit
+  ) {
     val granted = permissionsResult.entries.all { it.value }
     _uiState.update { it.copy(canRegister = granted) }
+
     if (granted) {
       onAllGranted()
       startMonitoring()
     } else {
       _uiState.update {
-        it.copy(recentError = "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet)")
+        it.copy(
+          recentError = "Allow Bluetooth, Connect, Internet permissions"
+        )
       }
     }
   }
@@ -206,15 +249,17 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
   override fun onCleared() {
     super.onCleared()
-    // Cancel all device monitoring jobs when ViewModel is cleared
     deviceMonitoringJobs.values.forEach { it.cancel() }
     deviceMonitoringJobs.clear()
     deviceSelectorJob?.cancel()
+    streamViewModel = null
   }
 
   private fun updateFirmwareUpdateRequired() {
-    val isRequired =
-        deviceCompatibility.values.any { it == DeviceCompatibility.DEVICE_UPDATE_REQUIRED }
-    _uiState.update { it.copy(isFirmwareUpdateRequired = isRequired) }
+    val required = deviceCompatibility.values.any {
+      it == DeviceCompatibility.DEVICE_UPDATE_REQUIRED
+    }
+
+    _uiState.update { it.copy(isFirmwareUpdateRequired = required) }
   }
 }
