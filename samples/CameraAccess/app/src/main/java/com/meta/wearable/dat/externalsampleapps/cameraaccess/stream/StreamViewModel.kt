@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -18,7 +17,6 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
-import com.meta.wearable.dat.core.types.DeviceSessionError
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.*
@@ -118,17 +116,44 @@ class StreamViewModel(
   }
 
   fun sharePhoto(bitmap: Bitmap) {
+
     val context = getApplication<Application>()
-    val dir = File(context.cacheDir, "share")
-    if (!dir.exists()) dir.mkdirs()
 
-    val file = File(dir, "shared.jpg")
+    val imagesFolder = File(context.cacheDir, "images")
 
-    FileOutputStream(file).use {
-      bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)
+    try {
+
+      imagesFolder.mkdirs()
+
+      val file = File(imagesFolder, "shared_image.jpg")
+
+      FileOutputStream(file).use { stream ->
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+      }
+
+      val uri = androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+      )
+
+      val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "image/jpeg"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+
+      context.startActivity(
+        android.content.Intent.createChooser(intent, "Share Photo").apply {
+          addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      )
+
+    } catch (e: Exception) {
+
+      Log.e(TAG, "Share failed", e)
     }
-
-    Log.d(TAG, "Photo saved for sharing: ${file.absolutePath}")
   }
 
   // =========================
@@ -166,7 +191,15 @@ class StreamViewModel(
     )
 
     bitmap?.let {
+
       Log.d(TAG, "Frame received")
+
+      _uiState.update { current ->
+        current.copy(
+          videoFrame = it,
+          videoFrameCount = current.videoFrameCount + 1
+        )
+      }
     }
   }
 
