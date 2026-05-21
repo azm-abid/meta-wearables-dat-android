@@ -199,22 +199,27 @@ fun NonStreamScreen(
           )
         }
 
-        // Voice hint — always visible when device is connected so user knows the mic is active
-        if (uiState.hasActiveDevice) {
-          Text(
-              text = "Say \"Take Picture\" to identify",
-              style = MaterialTheme.typography.bodyMedium,
-              color = Color.White.copy(alpha = 0.6f),
-              textAlign = TextAlign.Center,
-          )
+        // Listening indicator — shown when glasses are connected and voice is active
+        if (uiState.hasActiveDevice && !isUpdateRequired) {
+          Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+                text = "Listening...",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "Say \"Take Picture\" to identify",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+            )
+          }
         }
-
-        // Start Streaming Button
-        SwitchButton(
-            label = stringResource(R.string.stream_button_title),
-            onClick = { viewModel.navigateToStreaming(onRequestWearablesPermission) },
-            enabled = uiState.hasActiveDevice && !isUpdateRequired,
-        )
       }
 
       // Getting Started Sheet

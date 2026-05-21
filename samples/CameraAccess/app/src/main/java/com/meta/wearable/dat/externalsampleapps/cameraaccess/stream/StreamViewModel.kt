@@ -36,7 +36,6 @@ class StreamViewModel(
     companion object {
         private const val TAG = "StreamViewModel"
         private const val SERVER_URL = "http://192.168.1.146:8000/identify"
-        private const val RESULT_DISPLAY_MS = 4000L
     }
 
     private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -116,6 +115,7 @@ class StreamViewModel(
         )?.onSuccess { addedStream ->
             stream = addedStream
 
+            // SDK videoStream has main-thread affinity — must stay on Dispatchers.Main.
             videoJob = viewModelScope.launch {
                 stream?.videoStream?.collect { handleVideoFrame(it) }
             }
@@ -126,9 +126,16 @@ class StreamViewModel(
                 }
             }
 
+            // Only recover to idle when a stream error occurs while we're actively
+            // identifying (server upload in progress). Errors during stream init are
+            // non-fatal SDK events and must be ignored. Launch a new coroutine so
+            // returnToIdle() → stopStream() doesn't self-cancel this collector.
             errorJob = viewModelScope.launch {
-                stream?.errorStream?.collect {
-                    Log.e(TAG, "Stream error: ${it.description}")
+                stream?.errorStream?.collect { err ->
+                    Log.e(TAG, "Stream error: ${err.description}")
+                    if (_uiState.value.isAutoCaptureMode && _uiState.value.isIdentifying) {
+                        viewModelScope.launch { returnToIdle() }
+                    }
                 }
             }
 
@@ -203,18 +210,23 @@ class StreamViewModel(
         _uiState.update { it.copy(isCapturing = true) }
 
         viewModelScope.launch {
-            stream?.capturePhoto()
-                ?.onSuccess { photo ->
-                    handlePhotoData(photo)
-                    _uiState.update { it.copy(isCapturing = false) }
-                }
-                ?.onFailure { error, _ ->
-                    Log.e(TAG, "Capture failed: ${error.description}")
-                    _uiState.update { it.copy(isCapturing = false) }
-                    if (_uiState.value.isAutoCaptureMode) {
-                        viewModelScope.launch { returnToIdle() }
-                    }
-                }
+            // Fix 5: stream may have been nulled between the isCapturing check and here;
+            // treat a null result as a failure so isCapturing never stays stuck true.
+            val result = stream?.capturePhoto()
+            if (result == null) {
+                _uiState.update { it.copy(isCapturing = false) }
+                if (_uiState.value.isAutoCaptureMode) returnToIdle()
+                return@launch
+            }
+            result.onSuccess { photo ->
+                handlePhotoData(photo)
+                _uiState.update { it.copy(isCapturing = false) }
+            }
+            result.onFailure { error, _ ->
+                Log.e(TAG, "Capture failed: ${error.description}")
+                _uiState.update { it.copy(isCapturing = false) }
+                if (_uiState.value.isAutoCaptureMode) returnToIdle()
+            }
         }
     }
 
@@ -267,11 +279,10 @@ class StreamViewModel(
                 val name = parseNameFromJson(result)
 
                 viewModelScope.launch(Dispatchers.Main) {
-                    _uiState.update { it.copy(isIdentifying = false, recognitionResult = name) }
+                    _uiState.update { it.copy(isIdentifying = false) }
                     speakText(name)
-
                     if (isAutoMode) {
-                        delay(RESULT_DISPLAY_MS)
+                        delay(1500L)
                         returnToIdle()
                     }
                 }
