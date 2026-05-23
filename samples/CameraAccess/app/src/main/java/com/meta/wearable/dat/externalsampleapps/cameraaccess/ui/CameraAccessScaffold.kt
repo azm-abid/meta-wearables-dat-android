@@ -26,47 +26,33 @@ fun CameraAccessScaffold(
     onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
     modifier: Modifier = Modifier,
 ) {
-
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     val context = LocalContext.current
     val activity = context as? ComponentActivity
 
-    // -------------------------
-    // attach stream VM
-    // -------------------------
+    // Attach the stream ViewModel so WearablesViewModel can drive it via voice.
     LaunchedEffect(streamViewModel) {
-        streamViewModel?.let {
-            viewModel.attachStreamViewModel(it)
-        }
+        streamViewModel?.let { viewModel.attachStreamViewModel(it) }
     }
 
-    // -------------------------
-    // voice system
-    // -------------------------
+    // Register the real Wearables camera permission handler so voice-triggered
+    // captures can properly request the glasses camera permission when needed.
+    LaunchedEffect(onRequestWearablesPermission) {
+        viewModel.registerPermissionHandler(onRequestWearablesPermission)
+    }
+
+    // Continuous Android mic listening — passes recognised text to onVoiceCommand.
     val voiceManager = remember(activity) {
         activity?.let {
-            VoiceRecognitionManager(it) { text ->
-                viewModel.onVoiceCommand(text)
-            }
+            VoiceRecognitionManager(it) { text -> viewModel.onVoiceCommand(text) }
         }
     }
+    LaunchedEffect(voiceManager) { voiceManager?.startListening() }
+    DisposableEffect(Unit) { onDispose { voiceManager?.stop() } }
 
-    LaunchedEffect(voiceManager) {
-        voiceManager?.startListening()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            voiceManager?.stop()
-        }
-    }
-
-    // -------------------------
-    // errors
-    // -------------------------
+    // Snackbar for errors.
     LaunchedEffect(uiState.recentError) {
         uiState.recentError?.let {
             snackbarHostState.showSnackbar(it)
@@ -74,25 +60,16 @@ fun CameraAccessScaffold(
         }
     }
 
-    Surface(
-        modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(modifier = Modifier.fillMaxSize()) {
 
             when {
-                uiState.isStreaming ->
-                    StreamScreen(wearablesViewModel = viewModel)
-
-                uiState.isRegistered ->
-                    NonStreamScreen(
-                        viewModel = viewModel,
-                        onRequestWearablesPermission = onRequestWearablesPermission,
-                    )
-
-                else ->
-                    HomeScreen(viewModel = viewModel)
+                uiState.isStreaming  -> StreamScreen(wearablesViewModel = viewModel)
+                uiState.isRegistered -> NonStreamScreen(
+                    viewModel = viewModel,
+                    onRequestWearablesPermission = onRequestWearablesPermission,
+                )
+                else -> HomeScreen(viewModel = viewModel)
             }
 
             SnackbarHost(
@@ -100,7 +77,7 @@ fun CameraAccessScaffold(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(16.dp)
+                    .padding(16.dp),
             )
 
             if (BuildConfig.DEBUG) {
@@ -108,7 +85,7 @@ fun CameraAccessScaffold(
                     onClick = { viewModel.showDebugMenu() },
                     modifier = Modifier.align(Alignment.CenterEnd),
                 ) {
-                    Icon(Icons.Default.BugReport, contentDescription = "Debug Menu")
+                    Icon(Icons.Default.BugReport, contentDescription = "Debug")
                 }
 
                 if (uiState.isDebugMenuVisible) {

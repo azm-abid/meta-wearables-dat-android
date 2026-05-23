@@ -85,4 +85,10 @@ class MainActivity : ComponentActivity() {
     super.onStart()
     permissionCheckLauncher.launch(PERMISSIONS)
   }
+
+  override fun onStop() {
+    super.onStop()
+    streamViewModel.stopStream()
+    viewModel.navigateToDeviceSelection()
+  }
 }
