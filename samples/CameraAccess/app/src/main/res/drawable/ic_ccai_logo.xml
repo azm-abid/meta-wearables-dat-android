@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield body (white filled) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,14 L80,27 L80,57 C80,74 67,84 54,90 C41,84 28,74 28,57 L28,27 Z"/>
+
+    <!-- Shield interior (navy cutout — creates white border effect) -->
+    <path
+        android:fillColor="#0D1B3E"
+        android:pathData="M54,21 L73,33 L73,57 C73,70 63,78 54,84 C45,78 35,70 35,57 L35,33 Z"/>
+
+    <!-- Signal arc — large -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M38,62 A16,16 0 0,0 70,62"/>
+
+    <!-- Signal arc — medium -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M43,62 A11,11 0 0,0 65,62"/>
+
+    <!-- Signal arc — small -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M48,62 A6,6 0 0,0 60,62"/>
+
+    <!-- Base dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,62 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0"/>
+
+</vector>

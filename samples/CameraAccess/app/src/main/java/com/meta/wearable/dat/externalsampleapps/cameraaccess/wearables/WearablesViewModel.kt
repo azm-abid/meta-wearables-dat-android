@@ -3,8 +3,10 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import android.app.Activity
 import android.app.Application
+import android.speech.tts.TextToSpeech
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.util.Locale
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
@@ -25,6 +27,14 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _uiState = MutableStateFlow(WearablesUiState())
     val uiState: StateFlow<WearablesUiState> = _uiState.asStateFlow()
+
+    private var tts: TextToSpeech? = null
+
+    init {
+        tts = TextToSpeech(application) { status ->
+            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.US
+        }
+    }
 
     val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
     private var deviceSelectorJob: Job? = null
@@ -53,19 +63,25 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     fun onVoiceCommand(rawText: String) {
         val command = rawText.lowercase()
 
-        if (command.contains("identify")) {
-            when {
-                uiState.value.isStreaming -> {
-                    // Already streaming — capture immediately
-                    streamViewModel?.capturePhoto()
-                }
-                uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
-                    // Idle with glasses connected — start full auto-capture flow
-                    streamViewModel?.setAutoCaptureMode()
-                    navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
-                }
-                uiState.value.isRegistered -> {
-                    setRecentError("Glasses not connected")
+        when {
+            command.contains("command") && (command.contains("center") || command.contains("centre")) -> {
+                tts?.speak("Listening", TextToSpeech.QUEUE_FLUSH, null, "cc")
+            }
+
+            command.contains("identify") -> {
+                when {
+                    uiState.value.isStreaming -> {
+                        // Already streaming — capture immediately
+                        streamViewModel?.capturePhoto()
+                    }
+                    uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                        // Idle with glasses connected — start full auto-capture flow
+                        streamViewModel?.setAutoCaptureMode()
+                        navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+                    }
+                    uiState.value.isRegistered -> {
+                        setRecentError("Glasses not connected")
+                    }
                 }
             }
         }
@@ -210,5 +226,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
         deviceMonitoringJobs.clear()
         deviceSelectorJob?.cancel()
         streamViewModel = null
+        tts?.shutdown()
+        tts = null
     }
 }

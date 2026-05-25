@@ -35,7 +35,7 @@ class StreamViewModel(
 
     companion object {
         private const val TAG = "StreamViewModel"
-        private const val SERVER_URL = "http://192.168.1.159:8000/identify"
+        private const val SERVER_URL = "http://192.168.1.169:8000/identify"
         private const val STREAM_TIMEOUT_MS = 10_000L
     }
 
@@ -247,6 +247,10 @@ class StreamViewModel(
         } catch (e: JSONException) {
             if (raw.isNotBlank() && !raw.startsWith("ERROR")) raw else "Unknown"
         }
+    }
+
+    fun speak(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts")
     }
 
     private fun speakText(text: String) {
