@@ -17,7 +17,7 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="CCAI"
+        android:label="SpecOps"
         android:supportsRtl="true"
         android:theme="@style/Theme.CameraAccess"
         android:networkSecurityConfig="@xml/network_security_config">

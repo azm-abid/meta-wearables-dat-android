@@ -27,7 +27,35 @@ import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+@Composable
+private fun AnimatedListeningText() {
+    var dotCount by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            dotCount = (dotCount + 1) % 4
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "Listening",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+        )
+        Box(modifier = Modifier.width(24.dp)) {
+            Text(
+                text = ".".repeat(dotCount),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+        }
+    }
+}
 
 private val UpdateRequiredBackground = Color(0xFFFFF4D6)
 private val UpdateRequiredForeground = Color(0xFF8A4B00)
@@ -168,14 +196,9 @@ fun NonStreamScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
+                        AnimatedListeningText()
                         Text(
-                            text = "Listening...",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
-                        )
-                        Text(
-                            text = "Say \"Identify\" to capture and identify",
+                            text = "Say the Magic Word to interact",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center,

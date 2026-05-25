@@ -21,8 +21,8 @@
 
     <!-- Non Stream Screen -->
     <string name="camera_access_icon_description" description="Camera Access icon description">Camera Access icon</string>
-    <string name="non_stream_screen_title" description="Non stream screen title">Command Center AI</string>
-    <string name="non_stream_screen_description" description="Non stream screen description">Safe City</string>
+    <string name="non_stream_screen_title" description="Non stream screen title">SpecOps Glass</string>
+    <string name="non_stream_screen_description" description="Non stream screen description">Punjab Safe City Authority</string>
     <string name="waiting_for_active_device" description="Waiting for active device message">Waiting for an active device</string>
     <string name="update_required_title" description="Update required warning title">Update required</string>
     <string name="update_required_firmware_message" description="Firmware update required warning">Your glasses firmware needs an update before Camera Access can start.</string>
