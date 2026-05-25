@@ -23,7 +23,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 class MainActivity : ComponentActivity() {
 
   companion object {
-    val PERMISSIONS = arrayOf(BLUETOOTH, BLUETOOTH_CONNECT, CAMERA, INTERNET)
+    val PERMISSIONS = arrayOf(BLUETOOTH, BLUETOOTH_CONNECT, CAMERA, INTERNET, ACCESS_FINE_LOCATION)
   }
 
   val viewModel: WearablesViewModel by viewModels()

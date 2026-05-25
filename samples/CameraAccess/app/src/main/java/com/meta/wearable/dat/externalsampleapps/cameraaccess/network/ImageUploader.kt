@@ -8,26 +8,35 @@ import java.util.concurrent.TimeUnit
 
 object ImageUploader {
 
-    // Fix 1: timeouts so an unreachable server doesn't hang the app indefinitely.
-    // Fix 2: response.use {} ensures the connection is returned to the pool after each call.
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    fun uploadImage(file: File, serverUrl: String, onResult: (String) -> Unit) {
+    fun uploadImage(
+        file: File,
+        serverUrl: String,
+        deviceId: String,
+        latitude: Double?,
+        longitude: Double?,
+        timestamp: String,
+        onResult: (String) -> Unit,
+    ) {
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", file.name, file.asRequestBody("image/jpeg".toMediaType()))
+            .addFormDataPart("device_id", deviceId)
+            .addFormDataPart("timestamp", timestamp)
 
-        val requestBody = file.asRequestBody("image/jpeg".toMediaType())
+        if (latitude != null && longitude != null) {
+            multipart.addFormDataPart("latitude", latitude.toString())
+            multipart.addFormDataPart("longitude", longitude.toString())
+        }
 
         val request = Request.Builder()
             .url(serverUrl)
-            .post(
-                MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("file", file.name, requestBody)
-                    .build()
-            )
+            .post(multipart.build())
             .build()
 
         client.newCall(request).enqueue(object : Callback {

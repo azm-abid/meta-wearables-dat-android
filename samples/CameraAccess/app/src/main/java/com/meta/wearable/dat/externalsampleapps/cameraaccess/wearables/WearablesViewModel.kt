@@ -57,7 +57,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     // =========================
-    // VOICE COMMAND — keyword: "Identify"
+    // VOICE COMMAND — keyword: "Face Identify"
     // =========================
 
     fun onVoiceCommand(rawText: String) {
@@ -68,7 +68,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                 tts?.speak("Listening", TextToSpeech.QUEUE_FLUSH, null, "cc")
             }
 
-            command.contains("identify") -> {
+            command.contains("face identify") -> {
                 when {
                     uiState.value.isStreaming -> {
                         // Already streaming — capture immediately

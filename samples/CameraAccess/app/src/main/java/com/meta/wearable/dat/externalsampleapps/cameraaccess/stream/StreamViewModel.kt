@@ -3,12 +3,18 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ImageUploader
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Application
+import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.location.LocationManager
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -25,7 +31,10 @@ import kotlinx.coroutines.flow.*
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.*
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @SuppressLint("AutoCloseableUse")
 class StreamViewModel(
@@ -36,7 +45,21 @@ class StreamViewModel(
     companion object {
         private const val TAG = "StreamViewModel"
         private const val SERVER_URL = "http://192.168.1.169:8000/identify"
-        private const val STREAM_TIMEOUT_MS = 10_000L
+
+        // Time allowed for BT session + stream + first frame to arrive
+        private const val STREAM_TIMEOUT_MS = 25_000L
+
+        // Hard cap from first stabilized frame through upload completion
+        private const val PIPELINE_TIMEOUT_MS = 60_000L
+
+        // Skip this many frames so camera exposure/focus can settle before capture
+        private const val CAPTURE_STABILIZE_FRAMES = 5
+
+        // How many times to retry a failed capturePhoto() before giving up
+        private const val CAPTURE_MAX_RETRIES = 3
+
+        // Delay between capture retries
+        private const val CAPTURE_RETRY_DELAY_MS = 2_000L
     }
 
     private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -51,7 +74,15 @@ class StreamViewModel(
     private var stateJob: Job? = null
     private var errorJob: Job? = null
     private var sessionStateJob: Job? = null
-    private var timeoutJob: Job? = null
+
+    // Guards stream startup (cancelled when first stabilized frame arrives)
+    private var streamTimeoutJob: Job? = null
+
+    // Guards the entire capture→upload pipeline (cancelled in returnToIdle)
+    private var pipelineTimeoutJob: Job? = null
+
+    // Local frame counter — resets on each startStream(), not exposed to UI
+    private var frameCount = 0
 
     @Volatile private var autoCapturePending = false
 
@@ -59,9 +90,7 @@ class StreamViewModel(
 
     init {
         tts = TextToSpeech(application) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-            }
+            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.US
         }
     }
 
@@ -78,11 +107,11 @@ class StreamViewModel(
     fun startStream() {
         stopStream()
 
-        // If no video frame arrives within timeout, abort and show error.
-        timeoutJob = viewModelScope.launch {
+        // If no stabilized frame arrives within STREAM_TIMEOUT_MS, abort.
+        streamTimeoutJob = viewModelScope.launch {
             delay(STREAM_TIMEOUT_MS)
             if (autoCapturePending) {
-                Log.e(TAG, "Stream startup timed out")
+                Log.e(TAG, "Stream startup timed out after ${STREAM_TIMEOUT_MS}ms")
                 wearablesViewModel.setRecentError("Camera timed out – try again")
                 returnToIdle()
             }
@@ -106,11 +135,13 @@ class StreamViewModel(
     }
 
     fun stopStream() {
-        timeoutJob?.cancel();      timeoutJob = null
-        videoJob?.cancel();        videoJob = null
-        stateJob?.cancel();        stateJob = null
-        errorJob?.cancel();        errorJob = null
-        sessionStateJob?.cancel(); sessionStateJob = null
+        streamTimeoutJob?.cancel();   streamTimeoutJob = null
+        pipelineTimeoutJob?.cancel(); pipelineTimeoutJob = null
+        videoJob?.cancel();           videoJob = null
+        stateJob?.cancel();           stateJob = null
+        errorJob?.cancel();           errorJob = null
+        sessionStateJob?.cancel();    sessionStateJob = null
+        frameCount = 0
 
         stream?.stop(); stream = null
         session?.stop(); session = null
@@ -140,7 +171,8 @@ class StreamViewModel(
             errorJob = viewModelScope.launch {
                 stream?.errorStream?.collect { err ->
                     Log.e(TAG, "Stream error: ${err.description}")
-                    if (_uiState.value.isAutoCaptureMode && _uiState.value.isIdentifying) {
+                    // Return to idle on any stream error during auto-capture, regardless of phase
+                    if (_uiState.value.isAutoCaptureMode) {
                         viewModelScope.launch { returnToIdle() }
                     }
                 }
@@ -165,11 +197,22 @@ class StreamViewModel(
             videoFrame.buffer, videoFrame.width, videoFrame.height
         )
         bitmap?.let {
+            frameCount++
             _uiState.update { cur -> cur.copy(videoFrame = it, videoFrameCount = cur.videoFrameCount + 1) }
 
-            if (autoCapturePending) {
+            // Wait for CAPTURE_STABILIZE_FRAMES frames so the camera has settled
+            if (autoCapturePending && frameCount >= CAPTURE_STABILIZE_FRAMES) {
                 autoCapturePending = false
-                timeoutJob?.cancel(); timeoutJob = null
+                streamTimeoutJob?.cancel(); streamTimeoutJob = null
+
+                // Pipeline timeout: if capture+upload doesn't finish within limit, force idle
+                pipelineTimeoutJob?.cancel()
+                pipelineTimeoutJob = viewModelScope.launch {
+                    delay(PIPELINE_TIMEOUT_MS)
+                    Log.e(TAG, "Pipeline timed out after ${PIPELINE_TIMEOUT_MS}ms, forcing idle")
+                    returnToIdle()
+                }
+
                 capturePhoto()
             }
         }
@@ -178,20 +221,30 @@ class StreamViewModel(
     fun capturePhoto() {
         if (uiState.value.isCapturing) return
         _uiState.update { it.copy(isCapturing = true) }
-
         viewModelScope.launch {
-            val result = stream?.capturePhoto()
-            if (result == null) {
-                _uiState.update { it.copy(isCapturing = false) }
-                if (_uiState.value.isAutoCaptureMode) returnToIdle()
-                return@launch
-            }
-            result.onSuccess { photo ->
-                _uiState.update { it.copy(isCapturing = false) }
-                handlePhotoData(photo)
-            }
-            result.onFailure { error, _ ->
-                Log.e(TAG, "Capture failed: ${error.description}")
+            captureWithRetry(CAPTURE_MAX_RETRIES)
+        }
+    }
+
+    private suspend fun captureWithRetry(remainingAttempts: Int) {
+        val result = stream?.capturePhoto()
+        if (result == null) {
+            Log.w(TAG, "capturePhoto: stream is null")
+            _uiState.update { it.copy(isCapturing = false) }
+            if (_uiState.value.isAutoCaptureMode) returnToIdle()
+            return
+        }
+        result.onSuccess { photo ->
+            _uiState.update { it.copy(isCapturing = false) }
+            handlePhotoData(photo)
+        }
+        result.onFailure { error, _ ->
+            val attemptsLeft = remainingAttempts - 1
+            Log.w(TAG, "Capture failed ($attemptsLeft retries left): ${error.description}")
+            if (attemptsLeft > 0 && stream != null) {
+                delay(CAPTURE_RETRY_DELAY_MS)
+                captureWithRetry(attemptsLeft)
+            } else {
                 _uiState.update { it.copy(isCapturing = false) }
                 if (_uiState.value.isAutoCaptureMode) returnToIdle()
             }
@@ -211,7 +264,12 @@ class StreamViewModel(
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             }
         }
-        bitmap?.let { uploadToServer(it) }
+        if (bitmap != null) {
+            uploadToServer(bitmap)
+        } else {
+            Log.e(TAG, "Photo decoded to null bitmap")
+            if (_uiState.value.isAutoCaptureMode) viewModelScope.launch { returnToIdle() }
+        }
     }
 
     private fun uploadToServer(bitmap: Bitmap) {
@@ -228,8 +286,12 @@ class StreamViewModel(
 
         _uiState.update { it.copy(isIdentifying = true) }
 
+        val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        val (latitude, longitude) = getLastKnownLocation()
+        val timestamp = currentTimestamp()
+
         viewModelScope.launch(Dispatchers.IO) {
-            ImageUploader.uploadImage(file, SERVER_URL) { result ->
+            ImageUploader.uploadImage(file, SERVER_URL, deviceId, latitude, longitude, timestamp) { result ->
                 val name = parseNameFromJson(result)
                 viewModelScope.launch(Dispatchers.Main) {
                     _uiState.update { it.copy(isIdentifying = false) }
@@ -239,6 +301,26 @@ class StreamViewModel(
                 }
             }
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getLastKnownLocation(): Pair<Double?, Double?> {
+        val context = getApplication<Application>()
+        val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasFine && !hasCoarse) return Pair(null, null)
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val loc = try {
+            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        } catch (e: Exception) { null }
+        return Pair(loc?.latitude, loc?.longitude)
+    }
+
+    private fun currentTimestamp(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date())
     }
 
     private fun parseNameFromJson(raw: String): String {
@@ -262,7 +344,8 @@ class StreamViewModel(
     // =========================
 
     private suspend fun returnToIdle() {
-        timeoutJob?.cancel(); timeoutJob = null
+        streamTimeoutJob?.cancel();   streamTimeoutJob = null
+        pipelineTimeoutJob?.cancel(); pipelineTimeoutJob = null
         autoCapturePending = false
         _uiState.update {
             it.copy(
