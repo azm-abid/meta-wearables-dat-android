@@ -44,7 +44,7 @@ class StreamViewModel(
 
     companion object {
         private const val TAG = "StreamViewModel"
-        private const val SERVER_URL = "http://192.168.1.169:8000/identify"
+        private const val SERVER_URL = "http://192.168.1.10:8000/identify"
 
         // Time allowed for BT session + stream + first frame to arrive
         private const val STREAM_TIMEOUT_MS = 25_000L

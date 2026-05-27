@@ -203,6 +203,12 @@ fun NonStreamScreen(
                             color = Color.White.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center,
                         )
+                        Text(
+                            text = "Powered by MindClutch AI™",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center,
+                        )
                     }
                 }
             }
