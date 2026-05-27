@@ -325,7 +325,7 @@ class StreamViewModel(
 
     private fun parseNameFromJson(raw: String): String {
         return try {
-            JSONObject(raw).getString("name")
+            JSONObject(raw).getString("voice_text")
         } catch (e: JSONException) {
             if (raw.isNotBlank() && !raw.startsWith("ERROR")) raw else "Unknown"
         }
