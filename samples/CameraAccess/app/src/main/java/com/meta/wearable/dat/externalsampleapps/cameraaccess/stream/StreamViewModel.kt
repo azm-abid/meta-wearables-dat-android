@@ -1,7 +1,9 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ElevenLabsTts
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ImageUploader
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -12,7 +14,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.LocationManager
 import android.provider.Settings
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -26,8 +27,10 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.session.DeviceSession
 import com.meta.wearable.dat.core.session.DeviceSessionState
+import kotlin.coroutines.resume
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.*
@@ -35,6 +38,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
+private data class PersonResult(
+    val name: String,
+    val details: List<String>,
+) {
+    fun toDisplayText(): String = buildString {
+        appendLine(name)
+        details.forEach { appendLine(it) }
+    }.trim()
+
+    fun toSpeakText(): String = buildString {
+        append(name)
+        details.forEach { append(". $it") }
+    }
+}
 
 @SuppressLint("AutoCloseableUse")
 class StreamViewModel(
@@ -47,7 +65,7 @@ class StreamViewModel(
         private const val SERVER_URL = "http://192.168.1.10:8000/identify"
 
         // Time allowed for BT session + stream + first frame to arrive
-        private const val STREAM_TIMEOUT_MS = 25_000L
+        private const val STREAM_TIMEOUT_MS = 8_000L
 
         // Hard cap from first stabilized frame through upload completion
         private const val PIPELINE_TIMEOUT_MS = 60_000L
@@ -86,18 +104,13 @@ class StreamViewModel(
 
     @Volatile private var autoCapturePending = false
 
-    private var tts: TextToSpeech? = null
-
-    init {
-        tts = TextToSpeech(application) { status ->
-            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.US
-        }
-    }
+    private val elevenLabs = ElevenLabsTts(application)
 
     // Called by WearablesViewModel before navigating to the stream screen.
     fun setAutoCaptureMode() {
         autoCapturePending = true
         _uiState.update { it.copy(isAutoCaptureMode = true) }
+        wearablesViewModel.clearLastIdentificationResult()
     }
 
     // =========================
@@ -112,7 +125,8 @@ class StreamViewModel(
             delay(STREAM_TIMEOUT_MS)
             if (autoCapturePending) {
                 Log.e(TAG, "Stream startup timed out after ${STREAM_TIMEOUT_MS}ms")
-                wearablesViewModel.setRecentError("Camera timed out – try again")
+                speakText("Glasses not found, please try again")
+                wearablesViewModel.setRecentError("Glasses not found – try again")
                 returnToIdle()
             }
         }
@@ -132,6 +146,14 @@ class StreamViewModel(
                     viewModelScope.launch { returnToIdle() }
                 }
             }
+    }
+
+    fun cancelStream() {
+        viewModelScope.launch { returnToIdle() }
+    }
+
+    fun setVoiceMode(mode: VoiceMode) {
+        elevenLabs.setMode(mode)
     }
 
     fun stopStream() {
@@ -292,12 +314,10 @@ class StreamViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             ImageUploader.uploadImage(file, SERVER_URL, deviceId, latitude, longitude, timestamp) { result ->
-                val name = parseNameFromJson(result)
+                Log.d(TAG, "Raw server result: $result")
                 viewModelScope.launch(Dispatchers.Main) {
                     _uiState.update { it.copy(isIdentifying = false) }
-                    speakText(name)
-                    delay(2000L)
-                    returnToIdle()
+                    speakResultSequentially(result)
                 }
             }
         }
@@ -332,11 +352,79 @@ class StreamViewModel(
     }
 
     fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tts")
+        elevenLabs.speak(text)
     }
 
     private fun speakText(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "result")
+        elevenLabs.speak(text)
+    }
+
+    private suspend fun speakAndWait(text: String) = suspendCancellableCoroutine<Unit> { cont ->
+        elevenLabs.speak(text) { if (cont.isActive) cont.resume(Unit) }
+    }
+
+    private suspend fun speakResultSequentially(rawJson: String) {
+        val (facesDetected, persons) = parseStructuredResult(rawJson)
+
+        // Navigate back to NonStreamScreen first — speaking continues there
+        returnToIdle()
+
+        if (persons.isEmpty()) {
+            val voiceText = parseNameFromJson(rawJson)
+            wearablesViewModel.setLastIdentificationResult(voiceText)
+            speakAndWait(voiceText)
+            wearablesViewModel.clearLastIdentificationResult()
+            return
+        }
+
+        val countDisplay = if (facesDetected == 1) "Face Detected" else "Faces Detected: $facesDetected"
+        val countSpeak  = if (facesDetected == 1) "Face detected" else "$facesDetected faces detected"
+        wearablesViewModel.setLastIdentificationResult(countDisplay)
+        speakAndWait(countSpeak)
+
+        for (person in persons) {
+            wearablesViewModel.setLastIdentificationResult(person.toDisplayText())
+            speakAndWait(person.toSpeakText())
+        }
+
+        wearablesViewModel.clearLastIdentificationResult()
+    }
+
+    private fun parseStructuredResult(raw: String): Pair<Int, List<PersonResult>> {
+        return try {
+            val json = JSONObject(raw)
+            val facesDetected = json.optInt("faces_detected", 0)
+            val resultsArray: JSONArray? = json.optJSONArray("results")
+            val persons = mutableListOf<PersonResult>()
+            if (resultsArray != null) {
+                for (i in 0 until resultsArray.length()) {
+                    val r = resultsArray.getJSONObject(i)
+                    val name = r.optString("name", "").trim()
+                    if (name.isEmpty()) continue
+                    val rawDetails = mutableListOf<Pair<Int, String>>()
+                    r.keys().forEach { key ->
+                        val kl = key.lowercase()
+                        if (kl != "name") {
+                            val v = r.optString(key, "").trim()
+                            if (v.isNotEmpty() && v.toLongOrNull() == null && v.toDoubleOrNull() == null) {
+                                val order = when (kl) {
+                                    in setOf("designation", "title", "role", "position", "rank", "post") -> 0
+                                    in setOf("department", "organization", "org", "unit", "agency",
+                                             "division", "company", "bureau", "directorate")            -> 1
+                                    else -> 2
+                                }
+                                rawDetails.add(Pair(order, v))
+                            }
+                        }
+                    }
+                    persons.add(PersonResult(name, rawDetails.sortedBy { it.first }.map { it.second }))
+                }
+            }
+            Pair(facesDetected, persons)
+        } catch (e: Exception) {
+            Log.e(TAG, "parseStructuredResult failed: $e")
+            Pair(0, emptyList())
+        }
     }
 
     // =========================
@@ -353,6 +441,9 @@ class StreamViewModel(
                 isCapturing = false,
                 isIdentifying = false,
                 capturedPhoto = null,
+                videoFrame = null,
+                videoFrameCount = 0,
+                recognitionResult = null,
             )
         }
         stopStream()
@@ -362,8 +453,7 @@ class StreamViewModel(
     override fun onCleared() {
         super.onCleared()
         stopStream()
-        tts?.shutdown()
-        tts = null
+        elevenLabs.shutdown()
     }
 
     class Factory(

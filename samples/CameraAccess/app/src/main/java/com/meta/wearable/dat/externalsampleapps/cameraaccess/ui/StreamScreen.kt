@@ -2,6 +2,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -77,6 +78,21 @@ fun StreamScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(text = text, color = Color.White, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+
+        // Cancel button — visible while connecting/preparing (before any video frame arrives)
+        if (state.videoFrame == null && state.isAutoCaptureMode) {
+            OutlinedButton(
+                onClick = { streamViewModel.cancelStream() },
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.7f)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 40.dp),
+            ) {
+                Text("Cancel", color = Color.White)
             }
         }
     }

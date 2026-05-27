@@ -1,12 +1,12 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ElevenLabsTts
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import android.app.Activity
 import android.app.Application
-import android.speech.tts.TextToSpeech
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import java.util.Locale
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
@@ -28,13 +28,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     private val _uiState = MutableStateFlow(WearablesUiState())
     val uiState: StateFlow<WearablesUiState> = _uiState.asStateFlow()
 
-    private var tts: TextToSpeech? = null
-
-    init {
-        tts = TextToSpeech(application) { status ->
-            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.US
-        }
-    }
+    private val elevenLabs = ElevenLabsTts(application)
 
     val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
     private var deviceSelectorJob: Job? = null
@@ -65,7 +59,34 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
         when {
             command.contains("command") && (command.contains("center") || command.contains("centre")) -> {
-                tts?.speak("Listening", TextToSpeech.QUEUE_FLUSH, null, "cc")
+                elevenLabs.speak("Listening")
+            }
+
+            command.contains("switch to bella") || command.contains("switch to female") -> {
+                if (uiState.value.voiceMode == VoiceMode.BELLA) {
+                    elevenLabs.speak("Already using Bella")
+                } else {
+                    elevenLabs.speak("Switching to Bella")
+                    setVoiceMode(VoiceMode.BELLA)
+                }
+            }
+
+            command.contains("switch to adam") || command.contains("switch to male") -> {
+                if (uiState.value.voiceMode == VoiceMode.ADAM) {
+                    elevenLabs.speak("Already using Adam")
+                } else {
+                    elevenLabs.speak("Switching to Adam")
+                    setVoiceMode(VoiceMode.ADAM)
+                }
+            }
+
+            command.contains("switch to tts") || command.contains("switch to native") -> {
+                if (uiState.value.voiceMode == VoiceMode.TTS) {
+                    elevenLabs.speak("Already using built-in voice")
+                } else {
+                    elevenLabs.speak("Switching to T T S")
+                    setVoiceMode(VoiceMode.TTS)
+                }
             }
 
             command.contains("face identify") -> {
@@ -211,11 +232,30 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     // UI HELPERS
     // =========================
 
+    fun triggerFaceIdentify() {
+        when {
+            uiState.value.isStreaming -> streamViewModel?.capturePhoto()
+            uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                streamViewModel?.setAutoCaptureMode()
+                navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+            }
+            uiState.value.isRegistered -> setRecentError("Glasses not connected")
+        }
+    }
+
+    fun setVoiceMode(mode: VoiceMode) {
+        elevenLabs.setMode(mode)
+        streamViewModel?.setVoiceMode(mode)
+        _uiState.update { it.copy(voiceMode = mode) }
+    }
+
     fun simulateVoiceInput(text: String) { onVoiceCommand(text) }
     fun showDebugMenu() { _uiState.update { it.copy(isDebugMenuVisible = true) } }
     fun hideDebugMenu() { _uiState.update { it.copy(isDebugMenuVisible = false) } }
     fun showGettingStartedSheet() { _uiState.update { it.copy(isGettingStartedSheetVisible = true) } }
     fun hideGettingStartedSheet() { _uiState.update { it.copy(isGettingStartedSheetVisible = false) } }
+    fun setLastIdentificationResult(result: String) { _uiState.update { it.copy(lastIdentificationResult = result) } }
+    fun clearLastIdentificationResult() { _uiState.update { it.copy(lastIdentificationResult = null) } }
     fun clearRecentError() { _uiState.update { it.copy(recentError = null) } }
     internal fun setRecentError(error: String) { _uiState.update { it.copy(recentError = error) } }
     internal fun setDatAppUpdateRequired(required: Boolean) { _uiState.update { it.copy(isDatAppUpdateRequired = required) } }
@@ -226,7 +266,6 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
         deviceMonitoringJobs.clear()
         deviceSelectorJob?.cancel()
         streamViewModel = null
-        tts?.shutdown()
-        tts = null
+        elevenLabs.shutdown()
     }
 }

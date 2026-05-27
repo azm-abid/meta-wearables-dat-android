@@ -14,6 +14,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.RegistrationState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -28,6 +29,8 @@ data class WearablesUiState(
     val isDatAppUpdateRequired: Boolean = false,
     val hasActiveDevice: Boolean = false,
     val canRegister: Boolean = false,
+    val voiceMode: VoiceMode = VoiceMode.BELLA,
+    val lastIdentificationResult: String? = null,
 ) {
   val isRegistered: Boolean =
       registrationState == RegistrationState.REGISTERED ||

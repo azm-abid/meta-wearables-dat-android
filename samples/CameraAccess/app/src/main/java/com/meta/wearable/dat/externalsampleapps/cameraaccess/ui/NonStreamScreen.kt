@@ -1,8 +1,14 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
+import android.os.CancellationSignal
 import android.widget.Toast
 import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,11 +27,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,36 +90,62 @@ fun NonStreamScreen(
             contentAlignment = Alignment.Center,
         ) {
 
-            // Top-right disconnect menu
-            Box(modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding()) {
-                IconButton(onClick = { dropdownExpanded = true }) {
-                    Icon(
-                        imageVector = Icons.Default.LinkOff,
-                        contentDescription = "Disconnect",
-                        tint = Color.White,
-                        modifier = Modifier.size(28.dp),
-                    )
+            // Top-left: Face ID button
+            Box(modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(4.dp)) {
+                ActivateFaceIdButton(viewModel = viewModel)
+            }
+
+            // Top-right: voice mode pill + disconnect menu
+            Row(
+                modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                VoiceButton(
+                    voiceMode = uiState.voiceMode,
+                    onSelect = { viewModel.setVoiceMode(it) },
+                )
+                Box {
+                    IconButton(onClick = { dropdownExpanded = true }) {
+                        Icon(
+                            imageVector = Icons.Default.LinkOff,
+                            contentDescription = "Disconnect",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = dropdownExpanded,
+                        onDismissRequest = { dropdownExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(R.string.unregister_button_title),
+                                    color = if (isDisconnectEnabled) AppColor.Red else Color.Gray,
+                                )
+                            },
+                            enabled = isDisconnectEnabled,
+                            onClick = {
+                                activity?.let { viewModel.startUnregistration(it) }
+                                    ?: Toast.makeText(context, "Activity not available", Toast.LENGTH_SHORT).show()
+                                dropdownExpanded = false
+                            },
+                            modifier = Modifier.height(30.dp),
+                        )
+                    }
                 }
-                DropdownMenu(
-                    expanded = dropdownExpanded,
-                    onDismissRequest = { dropdownExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(R.string.unregister_button_title),
-                                color = if (isDisconnectEnabled) AppColor.Red else Color.Gray,
-                            )
-                        },
-                        enabled = isDisconnectEnabled,
-                        onClick = {
-                            activity?.let { viewModel.startUnregistration(it) }
-                                ?: Toast.makeText(context, "Activity not available", Toast.LENGTH_SHORT).show()
-                            dropdownExpanded = false
-                        },
-                        modifier = Modifier.height(30.dp),
-                    )
-                }
+            }
+
+            // Identification result — floats between top edge and glasses logo
+            uiState.lastIdentificationResult?.let { result ->
+                IdentificationResultCard(
+                    result = result,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .offset(y = (-215).dp)
+                        .widthIn(max = 280.dp),
+                )
             }
 
             // Centre content — app icon + title
@@ -287,6 +321,124 @@ private fun GettingStartedSheetContent(onContinue: () -> Unit, modifier: Modifie
             onClick = onContinue,
             modifier = Modifier.navigationBarsPadding(),
         )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun VoiceButton(voiceMode: VoiceMode, onSelect: (VoiceMode) -> Unit, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (voiceMode) {
+        VoiceMode.BELLA -> "Bella"
+        VoiceMode.ADAM  -> "Adam"
+        VoiceMode.TTS   -> "TTS"
+    }
+
+    Box(modifier = modifier) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+            Box(
+                modifier = Modifier
+                    .width(76.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { expanded = true },
+                    )
+                    .padding(horizontal = 14.dp, vertical = 3.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.Black,
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            listOf(VoiceMode.BELLA to "Bella", VoiceMode.ADAM to "Adam", VoiceMode.TTS to "TTS")
+                .forEach { (mode, name) ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = if (voiceMode == mode) "✓  $name" else "    $name",
+                                fontWeight = if (voiceMode == mode) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        },
+                        onClick = {
+                            onSelect(mode)
+                            expanded = false
+                        },
+                    )
+                }
+        }
+    }
+}
+
+@Composable
+private fun IdentificationResultCard(result: String, modifier: Modifier = Modifier) {
+    Text(
+        text = result,
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.Light,
+        color = Color.White,
+        textAlign = TextAlign.Center,
+        modifier = modifier,
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun ActivateFaceIdButton(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Box(modifier = modifier) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF6B1010))
+                    .combinedClickable(
+                        onClick = {
+                            val cancellationSignal = CancellationSignal()
+                            BiometricPrompt.Builder(context)
+                                .setTitle("Activate Face ID")
+                                .setSubtitle("Authenticate to identify")
+                                .setAllowedAuthenticators(
+                                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                                )
+                                .setConfirmationRequired(false)
+                                .build()
+                                .authenticate(
+                                    cancellationSignal,
+                                    context.mainExecutor,
+                                    object : BiometricPrompt.AuthenticationCallback() {
+                                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                            viewModel.triggerFaceIdentify()
+                                        }
+                                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {}
+                                        override fun onAuthenticationFailed() {}
+                                    }
+                                )
+                        },
+                        onLongClick = null,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Face ID",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+            }
+        }
     }
 }
 

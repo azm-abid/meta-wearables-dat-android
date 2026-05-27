@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.network
 
+import android.util.Log
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -7,6 +8,8 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object ImageUploader {
+
+    private const val TAG = "ImageUploader"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -42,12 +45,16 @@ object ImageUploader {
         client.newCall(request).enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: java.io.IOException) {
+                Log.e(TAG, "Upload failed — URL: $serverUrl | Error: ${e.message}", e)
                 onResult("ERROR: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 response.use { r ->
-                    onResult(r.body?.string() ?: "EMPTY RESPONSE")
+                    val body = r.body?.string() ?: "EMPTY RESPONSE"
+                    if (!r.isSuccessful) Log.e(TAG, "Server error ${r.code}: $body")
+                    else Log.d(TAG, "Server response: $body")
+                    onResult(body)
                 }
             }
         })
