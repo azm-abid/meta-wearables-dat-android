@@ -338,7 +338,7 @@ private fun VoiceButton(voiceMode: VoiceMode, onSelect: (VoiceMode) -> Unit, mod
         CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
             Box(
                 modifier = Modifier
-                    .width(76.dp)
+                    .width(58.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color.White)
                     .combinedClickable(

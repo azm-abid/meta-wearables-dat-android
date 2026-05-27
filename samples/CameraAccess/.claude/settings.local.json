@@ -3,7 +3,10 @@
     "allow": [
       "Bash(.\\\\gradlew assembleDebug)",
       "Bash(./gradlew assembleDebug)",
-      "Bash(./gradlew assembleDebug --quiet)"
+      "Bash(./gradlew assembleDebug --quiet)",
+      "Bash(curl -L -o \"C:/Users/azmab/AndroidStudioProjects/meta-wearables-dat-android/samples/CameraAccess/app/src/main/res/font/share_tech_mono.ttf\" \"https://raw.githubusercontent.com/google/fonts/main/ofl/sharetechmono/ShareTechMono-Regular.ttf\")",
+      "Bash(curl -L -o \"C:/Users/azmab/AndroidStudioProjects/meta-wearables-dat-android/samples/CameraAccess/app/src/main/res/font/orbitron_bold.ttf\" \"https://raw.githubusercontent.com/google/fonts/main/ofl/orbitron/Orbitron%5Bwght%5D.ttf\")",
+      "Bash(curl -L -o \"C:/Users/azmab/AndroidStudioProjects/meta-wearables-dat-android/samples/CameraAccess/app/src/main/res/font/bebas_neue.ttf\" \"https://raw.githubusercontent.com/google/fonts/main/ofl/bebasneue/BebasNeue-Regular.ttf\")"
     ]
   }
 }
