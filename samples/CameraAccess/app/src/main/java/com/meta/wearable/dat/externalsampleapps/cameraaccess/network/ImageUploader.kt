@@ -12,9 +12,9 @@ object ImageUploader {
     private const val TAG = "ImageUploader"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     fun uploadImage(
@@ -25,7 +25,7 @@ object ImageUploader {
         longitude: Double?,
         timestamp: String,
         onResult: (String) -> Unit,
-    ) {
+    ): Call {
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("file", file.name, file.asRequestBody("image/jpeg".toMediaType()))
@@ -42,9 +42,11 @@ object ImageUploader {
             .post(multipart.build())
             .build()
 
-        client.newCall(request).enqueue(object : Callback {
+        val call = client.newCall(request)
+        call.enqueue(object : Callback {
 
             override fun onFailure(call: Call, e: java.io.IOException) {
+                if (call.isCanceled()) return
                 Log.e(TAG, "Upload failed — URL: $serverUrl | Error: ${e.message}", e)
                 onResult("ERROR: ${e.message}")
             }
@@ -58,5 +60,6 @@ object ImageUploader {
                 }
             }
         })
+        return call
     }
 }

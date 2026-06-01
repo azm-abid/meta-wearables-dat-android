@@ -4,6 +4,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ElevenLabsTts
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.ImageUploader
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
+import okhttp3.Call
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -62,13 +63,13 @@ class StreamViewModel(
 
     companion object {
         private const val TAG = "StreamViewModel"
-        private const val SERVER_URL = "http://192.168.1.10:8000/identify"
+        private const val SERVER_URL = "http://10.151.206.223:8000/identify"
 
         // Time allowed for BT session + stream + first frame to arrive
         private const val STREAM_TIMEOUT_MS = 8_000L
 
         // Hard cap from first stabilized frame through upload completion
-        private const val PIPELINE_TIMEOUT_MS = 60_000L
+        private const val PIPELINE_TIMEOUT_MS = 30_000L
 
         // Skip this many frames so camera exposure/focus can settle before capture
         private const val CAPTURE_STABILIZE_FRAMES = 5
@@ -98,6 +99,9 @@ class StreamViewModel(
 
     // Guards the entire capture→upload pipeline (cancelled in returnToIdle)
     private var pipelineTimeoutJob: Job? = null
+
+    // Active OkHttp upload call — cancelled in stopStream() so it doesn't linger
+    private var activeUploadCall: Call? = null
 
     // Local frame counter — resets on each startStream(), not exposed to UI
     private var frameCount = 0
@@ -163,6 +167,7 @@ class StreamViewModel(
         stateJob?.cancel();           stateJob = null
         errorJob?.cancel();           errorJob = null
         sessionStateJob?.cancel();    sessionStateJob = null
+        activeUploadCall?.cancel();   activeUploadCall = null
         frameCount = 0
 
         stream?.stop(); stream = null
@@ -312,13 +317,15 @@ class StreamViewModel(
         val (latitude, longitude) = getLastKnownLocation()
         val timestamp = currentTimestamp()
 
-        viewModelScope.launch(Dispatchers.IO) {
-            ImageUploader.uploadImage(file, SERVER_URL, deviceId, latitude, longitude, timestamp) { result ->
-                Log.d(TAG, "Raw server result: $result")
-                viewModelScope.launch(Dispatchers.Main) {
-                    _uiState.update { it.copy(isIdentifying = false) }
-                    speakResultSequentially(result)
-                }
+        activeUploadCall?.cancel()
+        activeUploadCall = ImageUploader.uploadImage(
+            file, SERVER_URL, deviceId, latitude, longitude, timestamp
+        ) { result ->
+            Log.d(TAG, "Raw server result: $result")
+            viewModelScope.launch(Dispatchers.Main) {
+                activeUploadCall = null
+                _uiState.update { it.copy(isIdentifying = false) }
+                speakResultSequentially(result)
             }
         }
     }
