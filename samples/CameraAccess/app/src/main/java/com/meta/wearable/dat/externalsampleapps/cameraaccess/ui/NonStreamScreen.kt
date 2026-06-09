@@ -1,8 +1,5 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import android.hardware.biometrics.BiometricManager
-import android.hardware.biometrics.BiometricPrompt
-import android.os.CancellationSignal
 import android.widget.Toast
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.BorderStroke
@@ -34,6 +31,7 @@ import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.IdentifyMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -90,9 +88,9 @@ fun NonStreamScreen(
             contentAlignment = Alignment.Center,
         ) {
 
-            // Top-left: Face ID button
+            // Top-left: tap = trigger active mode, long press = pick mode
             Box(modifier = Modifier.align(Alignment.TopStart).systemBarsPadding().padding(4.dp)) {
-                ActivateFaceIdButton(viewModel = viewModel)
+                IdentifyButton(viewModel = viewModel)
             }
 
             // Top-right: voice mode pill + disconnect menu
@@ -394,48 +392,70 @@ private fun IdentificationResultCard(result: String, modifier: Modifier = Modifi
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun ActivateFaceIdButton(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+private fun IdentifyButton(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val activeMode = uiState.identifyMode
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    val label = when (activeMode) {
+        IdentifyMode.FACE     -> "Face ID"
+        IdentifyMode.VEHICLE  -> "Vehicle ID"
+        IdentifyMode.EVIDENCE -> "Evidence"
+    }
+    val bgColor = when (activeMode) {
+        IdentifyMode.FACE     -> Color(0xFF6B1010)
+        IdentifyMode.VEHICLE  -> Color(0xFF0A3D62)
+        IdentifyMode.EVIDENCE -> Color(0xFF4A3000)
+    }
+
     Box(modifier = modifier) {
         CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF6B1010))
+                    .background(bgColor)
                     .combinedClickable(
                         onClick = {
-                            val cancellationSignal = CancellationSignal()
-                            BiometricPrompt.Builder(context)
-                                .setTitle("Activate Face ID")
-                                .setSubtitle("Authenticate to identify")
-                                .setAllowedAuthenticators(
-                                    BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                                )
-                                .setConfirmationRequired(false)
-                                .build()
-                                .authenticate(
-                                    cancellationSignal,
-                                    context.mainExecutor,
-                                    object : BiometricPrompt.AuthenticationCallback() {
-                                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                                            viewModel.triggerFaceIdentify()
-                                        }
-                                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {}
-                                        override fun onAuthenticationFailed() {}
-                                    }
-                                )
+                            when (activeMode) {
+                                IdentifyMode.FACE     -> viewModel.triggerFaceIdentify()
+                                IdentifyMode.VEHICLE  -> viewModel.triggerVehicleIdentify()
+                                IdentifyMode.EVIDENCE -> viewModel.triggerEvidenceCapture()
+                            }
                         },
-                        onLongClick = null,
+                        onLongClick = { menuExpanded = true },
                     )
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Face ID",
+                    text = label,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            listOf(
+                IdentifyMode.FACE     to "Face ID",
+                IdentifyMode.VEHICLE  to "Vehicle ID",
+                IdentifyMode.EVIDENCE to "Evidence",
+            ).forEach { (mode, name) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = if (activeMode == mode) "✓  $name" else "    $name",
+                            fontWeight = if (activeMode == mode) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    },
+                    onClick = {
+                        viewModel.setIdentifyMode(mode)
+                        menuExpanded = false
+                    },
                 )
             }
         }

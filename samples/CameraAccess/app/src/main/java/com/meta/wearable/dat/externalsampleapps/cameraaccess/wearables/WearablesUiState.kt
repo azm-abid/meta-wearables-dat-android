@@ -18,6 +18,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
+enum class IdentifyMode { FACE, VEHICLE, EVIDENCE }
+
 data class WearablesUiState(
     val registrationState: RegistrationState = RegistrationState.UNAVAILABLE,
     val devices: ImmutableList<DeviceIdentifier> = persistentListOf(),
@@ -31,6 +33,7 @@ data class WearablesUiState(
     val canRegister: Boolean = false,
     val voiceMode: VoiceMode = VoiceMode.BELLA,
     val lastIdentificationResult: String? = null,
+    val identifyMode: IdentifyMode = IdentifyMode.FACE,
 ) {
   val isRegistered: Boolean =
       registrationState == RegistrationState.REGISTERED ||

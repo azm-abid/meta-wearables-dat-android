@@ -119,6 +119,25 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             }
+
+            command.contains("vehicle identify") -> {
+                android.util.Log.d("VoiceCmd", "VEHICLE IDENTIFY triggered — isStreaming=${uiState.value.isStreaming} hasDevice=${uiState.value.hasActiveDevice} isRegistered=${uiState.value.isRegistered}")
+                when {
+                    uiState.value.isStreaming -> {
+                        android.util.Log.d("VoiceCmd", "Already streaming → capturePhoto() for vehicle")
+                        streamViewModel?.capturePhoto()
+                    }
+                    uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                        android.util.Log.d("VoiceCmd", "Starting vehicle auto-capture flow")
+                        streamViewModel?.setVehicleCaptureMode()
+                        navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+                    }
+                    uiState.value.isRegistered -> {
+                        android.util.Log.d("VoiceCmd", "Glasses not connected")
+                        setRecentError("Glasses not connected")
+                    }
+                }
+            }
         }
     }
 
@@ -255,6 +274,31 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
             }
             uiState.value.isRegistered -> setRecentError("Glasses not connected")
         }
+    }
+
+    fun triggerVehicleIdentify() {
+        when {
+            uiState.value.isStreaming -> streamViewModel?.capturePhoto()
+            uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                streamViewModel?.setVehicleCaptureMode()
+                navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+            }
+            uiState.value.isRegistered -> setRecentError("Glasses not connected")
+        }
+    }
+
+    fun triggerEvidenceCapture() {
+        when {
+            uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                streamViewModel?.setEvidenceCaptureMode()
+                navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+            }
+            uiState.value.isRegistered -> setRecentError("Glasses not connected")
+        }
+    }
+
+    fun setIdentifyMode(mode: IdentifyMode) {
+        _uiState.update { it.copy(identifyMode = mode) }
     }
 
     fun setVoiceMode(mode: VoiceMode) {

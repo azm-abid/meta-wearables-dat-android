@@ -55,18 +55,34 @@ private data class PersonResult(
     }
 }
 
+private data class VehicleResult(
+    val plate: String,
+    val details: List<String>,
+) {
+    fun toDisplayText(): String = buildString {
+        appendLine(plate)
+        details.forEach { appendLine(it) }
+    }.trim()
+
+    fun toSpeakText(): String = buildString {
+        append(plate)
+        details.forEach { append(". $it") }
+    }
+}
+
 @SuppressLint("AutoCloseableUse")
 class StreamViewModel(
     application: Application,
     private val wearablesViewModel: WearablesViewModel,
 ) : AndroidViewModel(application) {
 
-    private enum class CaptureMode { IDENTIFY, EVIDENCE }
+    private enum class CaptureMode { IDENTIFY, EVIDENCE, VEHICLE }
 
     companion object {
         private const val TAG = "StreamViewModel"
         private const val SERVER_URL = "http://192.168.1.57:8000/identify"
         private const val EVIDENCE_URL = "http://192.168.1.57:8000/evidence"
+        private const val VEHICLE_URL = "http://192.168.1.57:8000/vehicle-identify"
 
         // Time allowed for BT session + stream + first frame to arrive
         private const val STREAM_TIMEOUT_MS = 8_000L
@@ -128,6 +144,14 @@ class StreamViewModel(
         captureMode = CaptureMode.EVIDENCE
         autoCapturePending = true
         _uiState.update { it.copy(isAutoCaptureMode = true) }
+    }
+
+    fun setVehicleCaptureMode() {
+        Log.d(TAG, "▶ setVehicleCaptureMode()")
+        captureMode = CaptureMode.VEHICLE
+        autoCapturePending = true
+        _uiState.update { it.copy(isAutoCaptureMode = true) }
+        wearablesViewModel.clearLastIdentificationResult()
     }
 
     // =========================
@@ -310,6 +334,7 @@ class StreamViewModel(
             when (captureMode) {
                 CaptureMode.EVIDENCE -> uploadEvidence(bitmap)
                 CaptureMode.IDENTIFY -> uploadToServer(bitmap)
+                CaptureMode.VEHICLE  -> uploadVehicle(bitmap)
             }
         } else {
             Log.e(TAG, "Photo decoded to null bitmap")
@@ -379,6 +404,97 @@ class StreamViewModel(
                 returnToIdle()
                 speakText("Evidence Stored")
             }
+        }
+    }
+
+    private fun uploadVehicle(bitmap: Bitmap) {
+        Log.d(TAG, "▶ uploadVehicle() — URL: $VEHICLE_URL")
+        val context = getApplication<Application>()
+        val file = File(context.cacheDir.also { it.mkdirs() }, "vehicle_capture.jpg")
+
+        try {
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save vehicle image", e)
+            if (_uiState.value.isAutoCaptureMode) viewModelScope.launch { returnToIdle() }
+            return
+        }
+
+        _uiState.update { it.copy(isIdentifying = true) }
+
+        val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        val (latitude, longitude) = getLastKnownLocation()
+        val timestamp = currentTimestamp()
+
+        Log.d(TAG, "▶ Sending vehicle request — deviceId=$deviceId lat=$latitude lon=$longitude ts=$timestamp")
+        activeUploadCall?.cancel()
+        activeUploadCall = ImageUploader.uploadImage(
+            file, VEHICLE_URL, deviceId, latitude, longitude, timestamp
+        ) { result ->
+            Log.d(TAG, "◀ Raw vehicle result: $result")
+            viewModelScope.launch(Dispatchers.Main) {
+                activeUploadCall = null
+                _uiState.update { it.copy(isIdentifying = false) }
+                speakVehicleResultSequentially(result)
+            }
+        }
+    }
+
+    private suspend fun speakVehicleResultSequentially(rawJson: String) {
+        val (vehiclesDetected, vehicles) = parseVehicleResult(rawJson)
+
+        returnToIdle()
+
+        if (vehicles.isEmpty()) {
+            val voiceText = parseNameFromJson(rawJson)
+            wearablesViewModel.setLastIdentificationResult(voiceText)
+            speakAndWait(voiceText)
+            wearablesViewModel.clearLastIdentificationResult()
+            return
+        }
+
+        val countDisplay = if (vehiclesDetected == 1) "Vehicle Detected" else "Vehicles Detected: $vehiclesDetected"
+        val countSpeak  = if (vehiclesDetected == 1) "Vehicle detected" else "$vehiclesDetected vehicles detected"
+        wearablesViewModel.setLastIdentificationResult(countDisplay)
+        speakAndWait(countSpeak)
+
+        for (vehicle in vehicles) {
+            wearablesViewModel.setLastIdentificationResult(vehicle.toDisplayText())
+            speakAndWait(vehicle.toSpeakText())
+        }
+
+        wearablesViewModel.clearLastIdentificationResult()
+    }
+
+    private fun parseVehicleResult(raw: String): Pair<Int, List<VehicleResult>> {
+        return try {
+            val json = JSONObject(raw)
+            val vehiclesDetected = json.optInt("vehicles_detected", 0)
+            val resultsArray: JSONArray? = json.optJSONArray("results")
+            val vehicles = mutableListOf<VehicleResult>()
+            if (resultsArray != null) {
+                for (i in 0 until resultsArray.length()) {
+                    val r = resultsArray.getJSONObject(i)
+                    val plateKeys = setOf("plate_number", "license_plate", "plate", "registration_number")
+                    val plate = plateKeys.firstNotNullOfOrNull { key ->
+                        r.optString(key, "").trim().takeIf { it.isNotEmpty() }
+                    } ?: continue
+                    val details = mutableListOf<String>()
+                    r.keys().forEach { key ->
+                        if (key.lowercase() !in plateKeys) {
+                            val v = r.optString(key, "").trim()
+                            if (v.isNotEmpty() && v.toLongOrNull() == null && v.toDoubleOrNull() == null) {
+                                details.add(v)
+                            }
+                        }
+                    }
+                    vehicles.add(VehicleResult(plate, details))
+                }
+            }
+            Pair(vehiclesDetected, vehicles)
+        } catch (e: Exception) {
+            Log.e(TAG, "parseVehicleResult failed: $e")
+            Pair(0, emptyList())
         }
     }
 

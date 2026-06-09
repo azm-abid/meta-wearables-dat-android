@@ -87,13 +87,20 @@ class MainActivity : ComponentActivity() {
     permissionCheckLauncher.launch(PERMISSIONS)
   }
 
-  // Volume-up acts as the physical capture shortcut (glasses button is inaccessible to 3rd-party
-  // apps — Meta firmware handles it internally and never dispatches a KeyEvent to us).
+  // Volume-up → face identify; Volume-down → vehicle identify.
+  // (The glasses button is inaccessible to 3rd-party apps — Meta firmware handles it internally.)
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-    if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP && event.action == KeyEvent.ACTION_DOWN) {
-      if (viewModel.uiState.value.isRegistered && viewModel.uiState.value.hasActiveDevice) {
-        viewModel.triggerFaceIdentify()
-        return true   // consume — no volume change
+    if (event.action == KeyEvent.ACTION_DOWN &&
+        viewModel.uiState.value.isRegistered && viewModel.uiState.value.hasActiveDevice) {
+      when (event.keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP -> {
+          viewModel.triggerFaceIdentify()
+          return true
+        }
+        KeyEvent.KEYCODE_VOLUME_DOWN -> {
+          viewModel.triggerVehicleIdentify()
+          return true
+        }
       }
     }
     return super.dispatchKeyEvent(event)
