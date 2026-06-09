@@ -2,6 +2,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 
 import android.Manifest.permission.*
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -84,6 +85,18 @@ class MainActivity : ComponentActivity() {
   override fun onStart() {
     super.onStart()
     permissionCheckLauncher.launch(PERMISSIONS)
+  }
+
+  // Volume-up acts as the physical capture shortcut (glasses button is inaccessible to 3rd-party
+  // apps — Meta firmware handles it internally and never dispatches a KeyEvent to us).
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP && event.action == KeyEvent.ACTION_DOWN) {
+      if (viewModel.uiState.value.isRegistered && viewModel.uiState.value.hasActiveDevice) {
+        viewModel.triggerFaceIdentify()
+        return true   // consume — no volume change
+      }
+    }
+    return super.dispatchKeyEvent(event)
   }
 
   override fun onStop() {

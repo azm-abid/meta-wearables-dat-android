@@ -61,9 +61,12 @@ class StreamViewModel(
     private val wearablesViewModel: WearablesViewModel,
 ) : AndroidViewModel(application) {
 
+    private enum class CaptureMode { IDENTIFY, EVIDENCE }
+
     companion object {
         private const val TAG = "StreamViewModel"
-        private const val SERVER_URL = "http://10.151.206.223:8000/identify"
+        private const val SERVER_URL = "http://192.168.1.57:8000/identify"
+        private const val EVIDENCE_URL = "http://192.168.1.57:8000/evidence"
 
         // Time allowed for BT session + stream + first frame to arrive
         private const val STREAM_TIMEOUT_MS = 8_000L
@@ -107,14 +110,24 @@ class StreamViewModel(
     private var frameCount = 0
 
     @Volatile private var autoCapturePending = false
+    private var captureMode = CaptureMode.IDENTIFY
 
     private val elevenLabs = ElevenLabsTts(application)
 
     // Called by WearablesViewModel before navigating to the stream screen.
     fun setAutoCaptureMode() {
+        Log.d(TAG, "▶ setAutoCaptureMode()")
+        captureMode = CaptureMode.IDENTIFY
         autoCapturePending = true
         _uiState.update { it.copy(isAutoCaptureMode = true) }
         wearablesViewModel.clearLastIdentificationResult()
+    }
+
+    fun setEvidenceCaptureMode() {
+        Log.d(TAG, "▶ setEvidenceCaptureMode()")
+        captureMode = CaptureMode.EVIDENCE
+        autoCapturePending = true
+        _uiState.update { it.copy(isAutoCaptureMode = true) }
     }
 
     // =========================
@@ -122,6 +135,7 @@ class StreamViewModel(
     // =========================
 
     fun startStream() {
+        Log.d(TAG, "▶ startStream()")
         stopStream()
 
         // If no stabilized frame arrives within STREAM_TIMEOUT_MS, abort.
@@ -231,6 +245,7 @@ class StreamViewModel(
             if (autoCapturePending && frameCount >= CAPTURE_STABILIZE_FRAMES) {
                 autoCapturePending = false
                 streamTimeoutJob?.cancel(); streamTimeoutJob = null
+                Log.d(TAG, "▶ Stabilized — triggering capturePhoto()")
 
                 // Pipeline timeout: if capture+upload doesn't finish within limit, force idle
                 pipelineTimeoutJob?.cancel()
@@ -292,7 +307,10 @@ class StreamViewModel(
             }
         }
         if (bitmap != null) {
-            uploadToServer(bitmap)
+            when (captureMode) {
+                CaptureMode.EVIDENCE -> uploadEvidence(bitmap)
+                CaptureMode.IDENTIFY -> uploadToServer(bitmap)
+            }
         } else {
             Log.e(TAG, "Photo decoded to null bitmap")
             if (_uiState.value.isAutoCaptureMode) viewModelScope.launch { returnToIdle() }
@@ -300,6 +318,7 @@ class StreamViewModel(
     }
 
     private fun uploadToServer(bitmap: Bitmap) {
+        Log.d(TAG, "▶ uploadToServer() — URL: $SERVER_URL")
         val context = getApplication<Application>()
         val file = File(context.cacheDir.also { it.mkdirs() }, "capture.jpg")
 
@@ -317,15 +336,48 @@ class StreamViewModel(
         val (latitude, longitude) = getLastKnownLocation()
         val timestamp = currentTimestamp()
 
+        Log.d(TAG, "▶ Sending request — deviceId=$deviceId lat=$latitude lon=$longitude ts=$timestamp")
         activeUploadCall?.cancel()
         activeUploadCall = ImageUploader.uploadImage(
             file, SERVER_URL, deviceId, latitude, longitude, timestamp
         ) { result ->
-            Log.d(TAG, "Raw server result: $result")
+            Log.d(TAG, "◀ Raw server result: $result")
             viewModelScope.launch(Dispatchers.Main) {
                 activeUploadCall = null
                 _uiState.update { it.copy(isIdentifying = false) }
                 speakResultSequentially(result)
+            }
+        }
+    }
+
+    private fun uploadEvidence(bitmap: Bitmap) {
+        val context = getApplication<Application>()
+        val file = File(context.cacheDir.also { it.mkdirs() }, "evidence.jpg")
+
+        try {
+            FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save evidence image", e)
+            if (_uiState.value.isAutoCaptureMode) viewModelScope.launch { returnToIdle() }
+            return
+        }
+
+        _uiState.update { it.copy(isIdentifying = true) }
+
+        val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        val (latitude, longitude) = getLastKnownLocation()
+        val timestamp = currentTimestamp()
+
+        activeUploadCall?.cancel()
+        activeUploadCall = ImageUploader.uploadImage(
+            file, EVIDENCE_URL, deviceId, latitude, longitude, timestamp
+        ) { result ->
+            Log.d(TAG, "Evidence upload result: $result")
+            viewModelScope.launch(Dispatchers.Main) {
+                activeUploadCall = null
+                _uiState.update { it.copy(isIdentifying = false) }
+                returnToIdle()
+                speakText("Evidence Stored")
             }
         }
     }
@@ -442,6 +494,7 @@ class StreamViewModel(
         streamTimeoutJob?.cancel();   streamTimeoutJob = null
         pipelineTimeoutJob?.cancel(); pipelineTimeoutJob = null
         autoCapturePending = false
+        captureMode = CaptureMode.IDENTIFY
         _uiState.update {
             it.copy(
                 isAutoCaptureMode = false,

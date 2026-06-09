@@ -90,14 +90,28 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             command.contains("face identify") -> {
+                android.util.Log.d("VoiceCmd", "FACE IDENTIFY triggered — isStreaming=${uiState.value.isStreaming} hasDevice=${uiState.value.hasActiveDevice} isRegistered=${uiState.value.isRegistered}")
                 when {
                     uiState.value.isStreaming -> {
-                        // Already streaming — capture immediately
+                        android.util.Log.d("VoiceCmd", "Already streaming → capturePhoto()")
                         streamViewModel?.capturePhoto()
                     }
                     uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
-                        // Idle with glasses connected — start full auto-capture flow
+                        android.util.Log.d("VoiceCmd", "Starting auto-capture flow")
                         streamViewModel?.setAutoCaptureMode()
+                        navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
+                    }
+                    uiState.value.isRegistered -> {
+                        android.util.Log.d("VoiceCmd", "Glasses not connected")
+                        setRecentError("Glasses not connected")
+                    }
+                }
+            }
+
+            command.contains("take evidence") -> {
+                when {
+                    uiState.value.isRegistered && uiState.value.hasActiveDevice -> {
+                        streamViewModel?.setEvidenceCaptureMode()
                         navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
                     }
                     uiState.value.isRegistered -> {
