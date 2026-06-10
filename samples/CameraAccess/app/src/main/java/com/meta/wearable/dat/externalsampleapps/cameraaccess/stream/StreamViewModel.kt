@@ -91,7 +91,7 @@ class StreamViewModel(
         private const val STREAM_TIMEOUT_MS = 8_000L
 
         // Hard cap from first stabilized frame through upload completion
-        private const val PIPELINE_TIMEOUT_MS = 30_000L
+        private const val PIPELINE_TIMEOUT_MS = 15_000L
 
         // Skip this many frames so camera exposure/focus can settle before capture
         private const val CAPTURE_STABILIZE_FRAMES = 5
@@ -121,6 +121,9 @@ class StreamViewModel(
 
     // Guards the entire capture→upload pipeline (cancelled in returnToIdle)
     private var pipelineTimeoutJob: Job? = null
+
+    // Tracks the active captureWithRetry coroutine so stopStream() can cancel it
+    private var captureJob: Job? = null
 
     // Active OkHttp upload call — cancelled in stopStream() so it doesn't linger
     private var activeUploadCall: Call? = null
@@ -233,6 +236,7 @@ class StreamViewModel(
     fun stopStream() {
         streamTimeoutJob?.cancel();   streamTimeoutJob = null
         pipelineTimeoutJob?.cancel(); pipelineTimeoutJob = null
+        captureJob?.cancel();         captureJob = null
         videoJob?.cancel();           videoJob = null
         stateJob?.cancel();           stateJob = null
         errorJob?.cancel();           errorJob = null
@@ -268,8 +272,13 @@ class StreamViewModel(
             errorJob = viewModelScope.launch {
                 stream?.errorStream?.collect { err ->
                     Log.e(TAG, "Stream error: ${err.description}")
-                    // Return to idle on any stream error during auto-capture, regardless of phase
-                    if (_uiState.value.isAutoCaptureMode) {
+                    val state = _uiState.value
+                    // If an upload is already in flight, let it finish — the SDK commonly closes
+                    // the stream right after a capture, and aborting here would cancel the HTTP
+                    // request before the server response arrives (the primary "no result" bug).
+                    // If only capturing, cancel the capture job and abort cleanly.
+                    if (state.isAutoCaptureMode && !state.isIdentifying) {
+                        captureJob?.cancel(); captureJob = null
                         viewModelScope.launch { returnToIdle() }
                     }
                 }
@@ -319,7 +328,7 @@ class StreamViewModel(
     fun capturePhoto() {
         if (uiState.value.isCapturing) return
         _uiState.update { it.copy(isCapturing = true) }
-        viewModelScope.launch {
+        captureJob = viewModelScope.launch {
             captureWithRetry(CAPTURE_MAX_RETRIES)
         }
     }

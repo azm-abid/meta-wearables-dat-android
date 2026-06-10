@@ -114,6 +114,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     } else {
       permissionCheckLauncher.launch(PERMISSIONS)
     }
+    // Re-subscribe to device state every time we come to foreground. The AutoDeviceSelector
+    // flow may miss BT reconnection events that happened while the app was in the background
+    // (Dispatchers.Main is throttled by Android). A fresh subscription re-reads current state.
+    viewModel.refreshDeviceState()
     // If we were streaming before going to background, restart the stream now
     if (viewModel.uiState.value.isStreaming) {
       streamViewModel.startStream()

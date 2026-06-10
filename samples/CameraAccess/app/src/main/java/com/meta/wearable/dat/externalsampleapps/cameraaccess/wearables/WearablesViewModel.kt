@@ -5,6 +5,12 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.network.VoiceMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import android.app.Activity
 import android.app.Application
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.core.Wearables
@@ -34,6 +40,24 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     private var deviceSelectorJob: Job? = null
 
     private var monitoringStarted = false
+
+    // Listens to Android's BT ACL events. The SDK's StateFlow caches its last-known
+    // "connected" state and re-emits it even after the glasses disconnect, so we cannot
+    // rely on it alone. On disconnect we also cancel the SDK job so it cannot overwrite
+    // the false value we set here.
+    private val btConnectionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    // Kill the SDK flow first — otherwise it immediately re-emits stale data
+                    deviceSelectorJob?.cancel()
+                    deviceSelectorJob = null
+                    _uiState.update { it.copy(hasActiveDevice = false) }
+                }
+                BluetoothDevice.ACTION_ACL_CONNECTED -> refreshDeviceState()
+            }
+        }
+    }
     private val deviceMonitoringJobs = mutableMapOf<DeviceIdentifier, Job>()
     private val deviceCompatibility = mutableMapOf<DeviceIdentifier, DeviceCompatibility>()
 
@@ -45,6 +69,19 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun attachStreamViewModel(vm: StreamViewModel) { streamViewModel = vm }
     fun detachStreamViewModel() { streamViewModel = null }
+
+    // Called from onStart() and from the BT connect receiver. Re-subscribes to the SDK
+    // device flow to pick up any state change that happened while unsubscribed.
+    fun refreshDeviceState() {
+        if (!monitoringStarted) return
+        deviceSelectorJob?.cancel()
+        deviceSelectorJob = null
+        deviceSelectorJob = viewModelScope.launch {
+            deviceSelector.activeDeviceFlow().collect { device ->
+                _uiState.update { it.copy(hasActiveDevice = device != null) }
+            }
+        }
+    }
 
     fun registerPermissionHandler(handler: suspend (Permission) -> PermissionStatus) {
         cameraPermissionHandler = handler
@@ -191,6 +228,20 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
         if (monitoringStarted) return
         monitoringStarted = true
 
+        val btFilter = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        }
+        // RECEIVER_EXPORTED is required for protected system broadcasts (BT ACL events)
+        // on API 33+. NOT_EXPORTED silently blocks them on some OEM builds.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getApplication<Application>().registerReceiver(
+                btConnectionReceiver, btFilter, Context.RECEIVER_EXPORTED
+            )
+        } else {
+            getApplication<Application>().registerReceiver(btConnectionReceiver, btFilter)
+        }
+
         deviceSelectorJob = viewModelScope.launch {
             deviceSelector.activeDeviceFlow().collect { device ->
                 _uiState.update { it.copy(hasActiveDevice = device != null) }
@@ -335,6 +386,10 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         super.onCleared()
+        if (monitoringStarted) {
+            try { getApplication<Application>().unregisterReceiver(btConnectionReceiver) }
+            catch (_: Exception) {}
+        }
         deviceMonitoringJobs.values.forEach { it.cancel() }
         deviceMonitoringJobs.clear()
         deviceSelectorJob?.cancel()
