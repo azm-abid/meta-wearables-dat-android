@@ -83,6 +83,9 @@ class StreamViewModel(
         private const val SERVER_URL = "http://192.168.1.57:8000/identify"
         private const val EVIDENCE_URL = "http://192.168.1.57:8000/evidence"
         private const val VEHICLE_URL = "http://192.168.1.57:8000/vehicle-identify"
+        private const val EMERGENCY_URL = "http://192.168.1.57:8000/emergency"
+        private const val HOSPITAL_URL = "http://192.168.1.57:8000/hospital"
+        private const val POLICE_URL = "http://192.168.1.57:8000/police-station"
 
         // Time allowed for BT session + stream + first frame to arrive
         private const val STREAM_TIMEOUT_MS = 8_000L
@@ -152,6 +155,35 @@ class StreamViewModel(
         autoCapturePending = true
         _uiState.update { it.copy(isAutoCaptureMode = true) }
         wearablesViewModel.clearLastIdentificationResult()
+    }
+
+    // =========================
+    // LOCATION-ONLY COMMANDS (no camera required)
+    // =========================
+
+    fun triggerEmergency() { postLocationRequest(EMERGENCY_URL) }
+    fun triggerNearestHospital() { postLocationRequest(HOSPITAL_URL) }
+    fun triggerNearestPoliceStation() { postLocationRequest(POLICE_URL) }
+
+    private fun postLocationRequest(url: String) {
+        val context = getApplication<Application>()
+        val deviceId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+        val (latitude, longitude) = getLastKnownLocation()
+        val timestamp = currentTimestamp()
+
+        ImageUploader.postLocationData(url, deviceId, latitude, longitude, timestamp, context) { result ->
+            viewModelScope.launch(Dispatchers.Main) {
+                speakText(parseMessageFromJson(result))
+            }
+        }
+    }
+
+    private fun parseMessageFromJson(raw: String): String {
+        return try {
+            JSONObject(raw).getString("message")
+        } catch (e: JSONException) {
+            if (raw.isNotBlank() && !raw.startsWith("ERROR")) raw else "Request failed"
+        }
     }
 
     // =========================
@@ -364,7 +396,7 @@ class StreamViewModel(
         Log.d(TAG, "▶ Sending request — deviceId=$deviceId lat=$latitude lon=$longitude ts=$timestamp")
         activeUploadCall?.cancel()
         activeUploadCall = ImageUploader.uploadImage(
-            file, SERVER_URL, deviceId, latitude, longitude, timestamp
+            file, SERVER_URL, deviceId, latitude, longitude, timestamp, context
         ) { result ->
             Log.d(TAG, "◀ Raw server result: $result")
             viewModelScope.launch(Dispatchers.Main) {
@@ -395,7 +427,7 @@ class StreamViewModel(
 
         activeUploadCall?.cancel()
         activeUploadCall = ImageUploader.uploadImage(
-            file, EVIDENCE_URL, deviceId, latitude, longitude, timestamp
+            file, EVIDENCE_URL, deviceId, latitude, longitude, timestamp, context
         ) { result ->
             Log.d(TAG, "Evidence upload result: $result")
             viewModelScope.launch(Dispatchers.Main) {
@@ -429,7 +461,7 @@ class StreamViewModel(
         Log.d(TAG, "▶ Sending vehicle request — deviceId=$deviceId lat=$latitude lon=$longitude ts=$timestamp")
         activeUploadCall?.cancel()
         activeUploadCall = ImageUploader.uploadImage(
-            file, VEHICLE_URL, deviceId, latitude, longitude, timestamp
+            file, VEHICLE_URL, deviceId, latitude, longitude, timestamp, context
         ) { result ->
             Log.d(TAG, "◀ Raw vehicle result: $result")
             viewModelScope.launch(Dispatchers.Main) {

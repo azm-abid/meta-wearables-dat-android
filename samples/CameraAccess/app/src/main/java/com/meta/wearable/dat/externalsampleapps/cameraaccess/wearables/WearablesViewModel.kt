@@ -120,6 +120,18 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
 
+            command.contains("calling emergency") -> {
+                streamViewModel?.triggerEmergency()
+            }
+
+            command.contains("nearest hospital") -> {
+                streamViewModel?.triggerNearestHospital()
+            }
+
+            command.contains("nearest police") -> {
+                streamViewModel?.triggerNearestPoliceStation()
+            }
+
             command.contains("vehicle identify") -> {
                 android.util.Log.d("VoiceCmd", "VEHICLE IDENTIFY triggered — isStreaming=${uiState.value.isStreaming} hasDevice=${uiState.value.hasActiveDevice} isRegistered=${uiState.value.isRegistered}")
                 when {
@@ -273,6 +285,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                 navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
             }
             uiState.value.isRegistered -> setRecentError("Glasses not connected")
+            else -> setRecentError("Not paired — open Meta View and connect your glasses")
         }
     }
 
@@ -284,6 +297,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                 navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
             }
             uiState.value.isRegistered -> setRecentError("Glasses not connected")
+            else -> setRecentError("Not paired — open Meta View and connect your glasses")
         }
     }
 
@@ -294,6 +308,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                 navigateToStreaming(cameraPermissionHandler ?: { PermissionStatus.Granted })
             }
             uiState.value.isRegistered -> setRecentError("Glasses not connected")
+            else -> setRecentError("Not paired — open Meta View and connect your glasses")
         }
     }
 
